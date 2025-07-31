@@ -263,22 +263,64 @@ export default function ApiTester() {
 
   const fetchServerLogs = async () => {
     try {
-      const response = await fetch("/api/server-logs")
+      console.log("🔄 Buscando logs do servidor...")
+      // Usar a rota através do sistema de roteamento dinâmico
+      const response = await fetch("/api/server-logs", {
+        cache: "no-cache",
+        headers: {
+          "Cache-Control": "no-cache",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
       const data = await response.json()
+      console.log(`📊 Recebidos ${data.logs?.length || 0} logs do servidor`)
       setServerLogs(data.logs || [])
     } catch (error) {
-      console.error("Erro ao buscar logs do servidor:", error)
+      console.error("❌ Erro ao buscar logs do servidor:", error)
+      // Tentar rota alternativa através do sistema dinâmico
+      try {
+        console.log("🔄 Tentando rota alternativa...")
+        const response = await fetch("/api/server-logs", {
+          method: "GET",
+          cache: "no-cache",
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log(`📊 Recebidos ${data.logs?.length || 0} logs (rota alternativa)`)
+          setServerLogs(data.logs || [])
+        } else {
+          toast({
+            title: "Erro",
+            description: "Erro ao buscar logs do servidor",
+            variant: "destructive",
+          })
+        }
+      } catch (altError) {
+        console.error("❌ Erro na rota alternativa:", altError)
+        toast({
+          title: "Erro",
+          description: "Erro ao buscar logs do servidor",
+          variant: "destructive",
+        })
+      }
     }
   }
 
   const clearServerLogs = async () => {
     try {
-      await fetch("/api/server-logs", { method: "DELETE" })
-      setServerLogs([])
-      toast({
-        title: "Logs do servidor limpos",
-        description: "Todos os logs do servidor foram removidos",
-      })
+      const response = await fetch("/api/server-logs", { method: "DELETE" })
+      if (response.ok) {
+        setServerLogs([])
+        toast({
+          title: "Logs do servidor limpos",
+          description: "Todos os logs do servidor foram removidos",
+        })
+      }
     } catch (error) {
       toast({
         title: "Erro",

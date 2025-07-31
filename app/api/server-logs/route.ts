@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server"
 
-// Importar os logs do arquivo de rotas dinâmicas
-// Como não podemos importar diretamente, vamos usar uma abordagem diferente
-// Vamos criar um sistema de logs global
-
+// Sistema global de logs em memória
 let globalServerLogs: any[] = []
 
 export function addServerLog(logEntry: any) {
@@ -11,13 +8,20 @@ export function addServerLog(logEntry: any) {
   if (globalServerLogs.length > 200) {
     globalServerLogs.splice(200)
   }
+  console.log("📝 LOG ADICIONADO:", logEntry.id, logEntry.method, logEntry.path)
 }
 
 export function getServerLogs() {
   return globalServerLogs
 }
 
+export function clearServerLogs() {
+  globalServerLogs = []
+}
+
 export async function GET() {
+  console.log(`📊 GET /api/server-logs - Retornando ${globalServerLogs.length} logs`)
+
   return NextResponse.json({
     logs: globalServerLogs,
     total: globalServerLogs.length,
@@ -26,7 +30,9 @@ export async function GET() {
 }
 
 export async function DELETE() {
-  globalServerLogs = []
+  console.log("🗑️ DELETE /api/server-logs - Limpando logs")
+  clearServerLogs()
+
   return NextResponse.json({
     message: "Logs limpos com sucesso",
     timestamp: new Date().toISOString(),
