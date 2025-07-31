@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, Plus, Play, Eye, Settings } from "lucide-react"
+import { Trash2, Plus, Play, Eye, Settings, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { ApiStatus } from "@/components/api-status"
 
 interface Endpoint {
   id: string
@@ -37,6 +38,7 @@ interface LogEntry {
 export default function ApiTester() {
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [serverLogs, setServerLogs] = useState<LogEntry[]>([])
   const [newEndpoint, setNewEndpoint] = useState<Endpoint>({
     id: "",
     path: "/api/test",
@@ -47,10 +49,10 @@ export default function ApiTester() {
     statusCode: 200,
   })
   const [testRequest, setTestRequest] = useState({
-    url: "",
+    url: typeof window !== "undefined" ? `${window.location.origin}/api/test` : "/api/test",
     method: "POST",
     headers: '{"Content-Type": "application/json"}',
-    body: '{"test": "data"}',
+    body: '{"test": "data", "message": "Testando API"}',
   })
 
   const { toast } = useToast()
@@ -65,6 +67,12 @@ export default function ApiTester() {
     if (savedLogs) {
       setLogs(JSON.parse(savedLogs))
     }
+  }, [])
+
+  useEffect(() => {
+    fetchServerLogs()
+    const interval = setInterval(fetchServerLogs, 5000) // Atualizar a cada 5 segundos
+    return () => clearInterval(interval)
   }, [])
 
   const saveEndpoints = (newEndpoints: Endpoint[]) => {
@@ -146,16 +154,44 @@ export default function ApiTester() {
         headers = JSON.parse(testRequest.headers)
       } catch {
         headers = { "Content-Type": "application/json" }
+        toast({
+          title: "Aviso",
+          description: "Headers inválidos, usando Content-Type padrão",
+        })
       }
 
-      const response = await fetch(testRequest.url, {
+      console.log("Fazendo requisição para:", testRequest.url)
+      console.log("Método:", testRequest.method)
+      console.log("Headers:", headers)
+      console.log("Body:", testRequest.body)
+
+      const fetchOptions: RequestInit = {
         method: testRequest.method,
         headers,
-        body: testRequest.method !== "GET" ? testRequest.body : undefined,
-      })
+      }
+
+      // Só adicionar body se não for GET
+      if (testRequest.method !== "GET" && testRequest.body) {
+        fetchOptions.body = testRequest.body
+      }
+
+      const response = await fetch(testRequest.url, fetchOptions)
 
       const duration = Date.now() - startTime
-      const responseText = await response.text()
+      let responseText = ""
+
+      try {
+        responseText = await response.text()
+      } catch (error) {
+        responseText = `Erro ao ler resposta: ${error instanceof Error ? error.message : "Erro desconhecido"}`
+      }
+
+      console.log("Resposta recebida:", {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: responseText,
+      })
 
       const logEntry: LogEntry = {
         id: Date.now().toString(),
@@ -170,25 +206,38 @@ export default function ApiTester() {
         duration,
       }
 
-      const updatedLogs = [logEntry, ...logs].slice(0, 100) // Manter apenas os últimos 100 logs
+      const updatedLogs = [logEntry, ...logs].slice(0, 100)
       saveLogs(updatedLogs)
+
+      const statusColor = response.status >= 200 && response.status < 300 ? "default" : "destructive"
 
       toast({
         title: "Teste realizado",
-        description: `Status: ${response.status} | Tempo: ${duration}ms`,
+        description: `Status: ${response.status} ${response.statusText} | Tempo: ${duration}ms`,
+        variant: statusColor === "destructive" ? "destructive" : "default",
       })
     } catch (error) {
       const duration = Date.now() - startTime
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+
+      console.error("Erro na requisição:", error)
+
       const logEntry: LogEntry = {
         id: Date.now().toString(),
         timestamp: new Date().toISOString(),
         endpoint: testRequest.url,
         method: testRequest.method,
-        requestHeaders: JSON.parse(testRequest.headers),
+        requestHeaders: (() => {
+          try {
+            return JSON.parse(testRequest.headers)
+          } catch {
+            return { "Content-Type": "application/json" }
+          }
+        })(),
         requestBody: testRequest.body,
         responseStatus: 0,
         responseHeaders: {},
-        responseBody: `Erro: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        responseBody: `Erro de rede: ${errorMessage}`,
         duration,
       }
 
@@ -197,7 +246,7 @@ export default function ApiTester() {
 
       toast({
         title: "Erro no teste",
-        description: error instanceof Error ? error.message : "Erro desconhecido",
+        description: `Erro de rede: ${errorMessage}`,
         variant: "destructive",
       })
     }
@@ -212,13 +261,41 @@ export default function ApiTester() {
     })
   }
 
+  const fetchServerLogs = async () => {
+    try {
+      const response = await fetch("/api/server-logs")
+      const data = await response.json()
+      setServerLogs(data.logs || [])
+    } catch (error) {
+      console.error("Erro ao buscar logs do servidor:", error)
+    }
+  }
+
+  const clearServerLogs = async () => {
+    try {
+      await fetch("/api/server-logs", { method: "DELETE" })
+      setServerLogs([])
+      toast({
+        title: "Logs do servidor limpos",
+        description: "Todos os logs do servidor foram removidos",
+      })
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Erro ao limpar logs do servidor",
+        variant: "destructive",
+      })
+    }
+  }
+
   return (
     <div className="container mx-auto p-6 max-w-6xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">API Tester</h1>
-        <p className="text-muted-foreground">
+        <p className="text-muted-foreground mb-4">
           Interface para testar APIs com endpoints personalizados e logs detalhados
         </p>
+        <ApiStatus />
       </div>
 
       <Tabs defaultValue="endpoints" className="space-y-6">
@@ -420,75 +497,165 @@ export default function ApiTester() {
         </TabsContent>
 
         <TabsContent value="logs" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Logs de Requisições</CardTitle>
-                <CardDescription>Histórico detalhado de todas as requisições</CardDescription>
-              </div>
-              <Button variant="outline" onClick={clearLogs}>
-                <Trash2 className="w-4 h-4 mr-2" />
-                Limpar Logs
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {logs.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">Nenhum log registrado</p>
-              ) : (
-                <div className="space-y-4 max-h-96 overflow-y-auto">
-                  {logs.map((log) => (
-                    <div key={log.id} className="border rounded-lg p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Badge variant={log.method === "GET" ? "secondary" : "default"}>{log.method}</Badge>
-                          <code className="text-sm">{log.endpoint}</code>
-                          <Badge
-                            variant={log.responseStatus >= 200 && log.responseStatus < 300 ? "default" : "destructive"}
-                          >
-                            {log.responseStatus}
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">{log.duration}ms</span>
-                        </div>
-                        <span className="text-sm text-muted-foreground">
-                          {new Date(log.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-
-                      <details className="text-sm">
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                          Ver detalhes
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          <div>
-                            <strong>Request Headers:</strong>
-                            <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-                              {JSON.stringify(log.requestHeaders, null, 2)}
-                            </pre>
-                          </div>
-                          {log.requestBody && (
-                            <div>
-                              <strong>Request Body:</strong>
-                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.requestBody}</pre>
-                            </div>
-                          )}
-                          <div>
-                            <strong>Response Headers:</strong>
-                            <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-                              {JSON.stringify(log.responseHeaders, null, 2)}
-                            </pre>
-                          </div>
-                          <div>
-                            <strong>Response Body:</strong>
-                            <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.responseBody}</pre>
-                          </div>
-                        </div>
-                      </details>
-                    </div>
-                  ))}
+          <div className="grid grid-cols-2 gap-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Logs de Teste</CardTitle>
+                  <CardDescription>Requisições feitas pelo testador</CardDescription>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <Button variant="outline" onClick={clearLogs}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Limpar
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {logs.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">Nenhum log de teste</p>
+                ) : (
+                  <div className="space-y-4 max-h-96 overflow-y-auto">
+                    {logs.map((log) => (
+                      <div key={log.id} className="border rounded-lg p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary">TESTE</Badge>
+                            <Badge variant={log.method === "GET" ? "secondary" : "default"}>{log.method}</Badge>
+                            <code className="text-sm">{log.endpoint}</code>
+                            <Badge
+                              variant={
+                                log.responseStatus >= 200 && log.responseStatus < 300 ? "default" : "destructive"
+                              }
+                            >
+                              {log.responseStatus}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">{log.duration}ms</span>
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(log.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <details className="text-sm">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                            Ver detalhes
+                          </summary>
+                          <div className="mt-2 space-y-2">
+                            <div>
+                              <strong>Request Headers:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                {JSON.stringify(log.requestHeaders, null, 2)}
+                              </pre>
+                            </div>
+                            {log.requestBody && (
+                              <div>
+                                <strong>Request Body:</strong>
+                                <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.requestBody}</pre>
+                              </div>
+                            )}
+                            <div>
+                              <strong>Response Headers:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                {JSON.stringify(log.responseHeaders, null, 2)}
+                              </pre>
+                            </div>
+                            <div>
+                              <strong>Response Body:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.responseBody}</pre>
+                            </div>
+                          </div>
+                        </details>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Logs do Servidor</CardTitle>
+                  <CardDescription>Todas as requisições recebidas nos endpoints ({serverLogs.length})</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={fetchServerLogs}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Atualizar
+                  </Button>
+                  <Button variant="outline" onClick={clearServerLogs}>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Limpar
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {serverLogs.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">Nenhuma requisição recebida</p>
+                ) : (
+                  <div className="space-y-4 max-h-96 overflow-y-auto">
+                    {serverLogs.map((log) => (
+                      <div key={log.id} className="border rounded-lg p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={log.source === "endpoint" ? "default" : "outline"}>
+                              {log.source === "endpoint" ? "ENDPOINT" : "CORS"}
+                            </Badge>
+                            <Badge variant={log.method === "GET" ? "secondary" : "default"}>{log.method}</Badge>
+                            <code className="text-sm">{log.path}</code>
+                            <Badge
+                              variant={
+                                log.response.status >= 200 && log.response.status < 300 ? "default" : "destructive"
+                              }
+                            >
+                              {log.response.status}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">{log.processingTime}ms</span>
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(log.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-muted-foreground">
+                          IP: {log.ip} | User-Agent: {log.userAgent?.substring(0, 50)}...
+                        </div>
+
+                        <details className="text-sm">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                            Ver detalhes completos
+                          </summary>
+                          <div className="mt-2 space-y-2">
+                            <div>
+                              <strong>Request Headers:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                {JSON.stringify(log.requestHeaders, null, 2)}
+                              </pre>
+                            </div>
+                            {log.requestBody && (
+                              <div>
+                                <strong>Request Body:</strong>
+                                <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.requestBody}</pre>
+                              </div>
+                            )}
+                            <div>
+                              <strong>Response Headers:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                {JSON.stringify(log.response.headers, null, 2)}
+                              </pre>
+                            </div>
+                            <div>
+                              <strong>Response Body:</strong>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">{log.response.body}</pre>
+                            </div>
+                          </div>
+                        </details>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
